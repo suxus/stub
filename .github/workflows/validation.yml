@@ -10,6 +10,9 @@ on:
 permissions:
   contents: read
 
+env:
+  ALMALINUX_IMAGE: docker.io/library/almalinux@sha256:9f355ae942d6a6c0561f0771dc053a2cfae9580fc45fa4252756db7c7e80c09f
+
 concurrency:
   group: validation-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -26,7 +29,7 @@ jobs:
           set -euo pipefail
           git init .
           git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
-          git -c protocol.version=2 fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git -c protocol.version=2 fetch --no-tags --depth=2 origin "$GITHUB_SHA"
           git checkout --detach "$GITHUB_SHA"
       - name: Validate shell contracts
         shell: bash
@@ -85,15 +88,15 @@ jobs:
           set -euo pipefail
           git init .
           git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
-          git -c protocol.version=2 fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git -c protocol.version=2 fetch --no-tags --depth=2 origin "$GITHUB_SHA"
           git checkout --detach "$GITHUB_SHA"
       - name: Pull and identify AlmaLinux image
         shell: bash
         run: |
           set -euo pipefail
-          docker pull almalinux:8.10
-          docker image inspect --format 'Image ID: {{.Id}}' almalinux:8.10
-          docker image inspect --format 'Repository digests: {{join .RepoDigests ", "}}' almalinux:8.10
+          docker pull "$ALMALINUX_IMAGE"
+          docker image inspect --format 'Image ID: {{.Id}}' "$ALMALINUX_IMAGE"
+          docker image inspect --format 'Repository digests: {{join .RepoDigests ", "}}' "$ALMALINUX_IMAGE"
       - name: Run disposable AlmaLinux scenario
         shell: bash
         env:
@@ -104,5 +107,5 @@ jobs:
           docker run --rm \
             --network "$NETWORK" \
             --volume "$GITHUB_WORKSPACE:/workspace:ro" \
-            almalinux:8.10 \
+            "$ALMALINUX_IMAGE" \
             bash /workspace/tests/test_acquire_almalinux.sh "$SCENARIO"

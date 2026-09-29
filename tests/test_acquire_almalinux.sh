@@ -44,6 +44,7 @@ remove_command_package() {
     rpm -e --nodeps "$package_name"
     hash -r
     command -v "$command_name" >/dev/null 2>&1 && fail "$command_name remained after removing $package_name"
+    return 0
 }
 
 run_install() {
