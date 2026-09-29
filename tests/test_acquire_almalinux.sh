@@ -47,6 +47,19 @@ remove_command_package() {
     return 0
 }
 
+remove_git_packages() {
+    rpm -e --nodeps git git-core
+    hash -r
+    command -v git >/dev/null 2>&1 && fail "git remained after removing git and git-core"
+}
+
+remove_ssh_packages_for_keygen_test() {
+    rpm -e --nodeps openssh-clients openssh
+    hash -r
+    command -v ssh >/dev/null 2>&1 && fail "ssh remained after removing OpenSSH packages"
+    command -v ssh-keygen >/dev/null 2>&1 && fail "ssh-keygen remained after removing OpenSSH packages"
+}
+
 run_install() {
     "$SCRIPT" prerequisites-install --authorize-prerequisite-install
     assert_all_present
@@ -68,7 +81,7 @@ case "$SCENARIO" in
         ;;
     git-missing)
         install_baseline
-        remove_command_package git
+        remove_git_packages
         "$SCRIPT" prerequisites-plan | grep -Fq 'Packages: git' || fail "git package plan"
         run_install
         ;;
@@ -87,7 +100,7 @@ case "$SCENARIO" in
         install_baseline
         saved="$(mktemp)"
         cp -- "$(command -v ssh)" "$saved"
-        remove_command_package ssh-keygen
+        remove_ssh_packages_for_keygen_test
         install -m 0755 -- "$saved" /usr/local/bin/ssh
         "$SCRIPT" prerequisites-plan | grep -Fq 'Packages: openssh-clients' || fail "ssh-keygen package plan"
         run_install
@@ -110,7 +123,7 @@ case "$SCENARIO" in
         ;;
     repository-error)
         install_baseline
-        remove_command_package git
+        remove_git_packages
         mkdir -p /tmp/original-repos
         shopt -s nullglob
         repo_files=(/etc/yum.repos.d/*.repo)
@@ -126,7 +139,7 @@ case "$SCENARIO" in
         ;;
     repeated-install)
         install_baseline
-        remove_command_package git
+        remove_git_packages
         run_install
         before="$(rpm -qa | sort | sha256sum | awk '{print $1}')"
         "$SCRIPT" prerequisites-install --authorize-prerequisite-install | grep -Fq 'prerequisites already present' ||
@@ -150,7 +163,7 @@ case "$SCENARIO" in
         ;;
     post-install-verification)
         if command -v git >/dev/null 2>&1; then
-            remove_command_package git
+            remove_git_packages
         fi
         mock_bin="$(mktemp -d)"
         printf '#!/usr/bin/env bash\nexit 0\n' > "$mock_bin/dnf"
