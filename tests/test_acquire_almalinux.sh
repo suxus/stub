@@ -51,6 +51,7 @@ remove_git_packages() {
     rpm -e --nodeps git git-core
     hash -r
     command -v git >/dev/null 2>&1 && fail "git remained after removing git and git-core"
+    return 0
 }
 
 remove_ssh_packages_for_keygen_test() {
@@ -58,6 +59,7 @@ remove_ssh_packages_for_keygen_test() {
     hash -r
     command -v ssh >/dev/null 2>&1 && fail "ssh remained after removing OpenSSH packages"
     command -v ssh-keygen >/dev/null 2>&1 && fail "ssh-keygen remained after removing OpenSSH packages"
+    return 0
 }
 
 run_install() {
