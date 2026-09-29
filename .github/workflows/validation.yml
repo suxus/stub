@@ -1,0 +1,108 @@
+name: Validation
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-and-offline:
+    name: Static and offline contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact workflow revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          git -c protocol.version=2 fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git checkout --detach "$GITHUB_SHA"
+      - name: Validate shell contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n acquire.sh inventory.sh tests/test_acquire.sh tests/test_acquire_almalinux.sh tests/test_inventory.sh
+          shellcheck acquire.sh inventory.sh tests/test_acquire.sh tests/test_acquire_almalinux.sh tests/test_inventory.sh
+          tests/test_acquire.sh
+          tests/test_inventory.sh
+          git diff --check HEAD^
+      - name: Scan committed tree for prohibited material
+        shell: bash
+        run: |
+          set -euo pipefail
+          prohibited='BEGIN [A-Z ]*PRIVATE KEY|automation[.]suxus[.]com|BO7''I2nr0|II9''Z5qDROZ|/etc/suxus/github/keys/suxus__''scripts'
+          if git grep -n -E "$prohibited"; then
+            exit 1
+          fi
+
+  almalinux-8-10:
+    name: AlmaLinux 8.10 / ${{ matrix.scenario }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scenario: fresh
+            network: bridge
+          - scenario: git-missing
+            network: bridge
+          - scenario: ssh-missing
+            network: bridge
+          - scenario: ssh-keygen-missing
+            network: bridge
+          - scenario: ca-certificates-missing
+            network: bridge
+          - scenario: all-present
+            network: bridge
+          - scenario: repository-error
+            network: bridge
+          - scenario: repeated-install
+            network: bridge
+          - scenario: detect-plan-readonly
+            network: none
+          - scenario: authorized-install
+            network: bridge
+          - scenario: acquire-offline-contract
+            network: bridge
+          - scenario: post-install-verification
+            network: bridge
+    steps:
+      - name: Check out exact workflow revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          git -c protocol.version=2 fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git checkout --detach "$GITHUB_SHA"
+      - name: Pull and identify AlmaLinux image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull almalinux:8.10
+          docker image inspect --format 'Image ID: {{.Id}}' almalinux:8.10
+          docker image inspect --format 'Repository digests: {{join .RepoDigests ", "}}' almalinux:8.10
+      - name: Run disposable AlmaLinux scenario
+        shell: bash
+        env:
+          SCENARIO: ${{ matrix.scenario }}
+          NETWORK: ${{ matrix.network }}
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --network "$NETWORK" \
+            --volume "$GITHUB_WORKSPACE:/workspace:ro" \
+            almalinux:8.10 \
+            bash /workspace/tests/test_acquire_almalinux.sh "$SCENARIO"
