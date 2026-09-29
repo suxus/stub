@@ -119,7 +119,17 @@ ensure_directory_chain() {
 }
 
 safe_git() {
-    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_COUNT=0 GIT_TERMINAL_PROMPT=0 command git "$@"
+    GIT_CONFIG_NOSYSTEM=1 \
+    GIT_CONFIG_GLOBAL=/dev/null \
+    GIT_CONFIG_COUNT=0 \
+    GIT_NO_REPLACE_OBJECTS=1 \
+    GIT_TERMINAL_PROMPT=0 \
+        command git \
+        -c core.hooksPath=/dev/null \
+        -c core.fsmonitor=false \
+        -c credential.helper= \
+        -c protocol.ext.allow=never \
+        "$@"
 }
 
 os_release_path() { printf '%s' /etc/os-release; }
@@ -297,10 +307,19 @@ repository_alias() {
 canonical_alias_origin() { printf 'git@%s:%s.git' "$(repository_alias "$REPOSITORY")" "$REPOSITORY"; }
 
 validate_existing_checkout() {
-    local actual_remote actual_revision direct alias
+    local actual_remote actual_revision actual_root direct alias
     direct="$(direct_origin)"; alias="$(canonical_alias_origin)"
     [[ -d "$DESTINATION" && ! -L "$DESTINATION" && -d "$DESTINATION/.git" && ! -L "$DESTINATION/.git" ]] || fail "existing destination is not a safe Git checkout"
-    actual_remote="$(safe_git -C "$DESTINATION" remote get-url origin 2>/dev/null || true)"
+    [[ -f "$DESTINATION/.git/config" && ! -L "$DESTINATION/.git/config" &&
+        -f "$DESTINATION/.git/HEAD" && ! -L "$DESTINATION/.git/HEAD" ]] ||
+        fail "existing checkout has unsafe Git metadata"
+    [[ ! -e "$DESTINATION/.git/objects/info/alternates" && ! -L "$DESTINATION/.git/objects/info/alternates" ]] ||
+        fail "existing checkout uses external object alternates"
+    [[ ! -e "$DESTINATION/.git/info/grafts" && ! -L "$DESTINATION/.git/info/grafts" ]] ||
+        fail "existing checkout uses replacement grafts"
+    actual_root="$(safe_git -C "$DESTINATION" rev-parse --show-toplevel 2>/dev/null || true)"
+    [[ "$actual_root" == "$DESTINATION" ]] || fail "existing checkout redirects its work tree"
+    actual_remote="$(safe_git -C "$DESTINATION" config --local --no-includes --get remote.origin.url 2>/dev/null || true)"
     [[ "$actual_remote" == "$direct" || "$actual_remote" == "$alias" ]] || fail "existing checkout has an unexpected origin"
     actual_revision="$(safe_git -C "$DESTINATION" rev-parse HEAD 2>/dev/null || true)"
     [[ "$actual_revision" == "$REVISION" ]] || fail "existing checkout is not at the requested revision"
@@ -375,14 +394,17 @@ checkout_repository() {
 
 adopt_origin() {
     local actual_origin expected_direct expected_alias expected_command old_command="" had_command=0
-    local effective alias hostname user identities strict identity known_hosts destination_parent operation checkout fetched already_adopted=0
+    local effective alias hostname user identities strict identity known_hosts destination_parent operation checkout fetched already_adopted=0 probe_ssh_command
     [[ "$AUTHORIZED_ORIGIN_ADOPTION" -eq 1 ]] || fail "adopt-origin requires --authorize-origin-adoption"
     expected_direct="$(direct_origin)"; expected_alias="$(canonical_alias_origin)"
     [[ "$EXPECTED_OLD_ORIGIN" == "$expected_direct" ]] || fail "expected old origin is not the canonical direct origin"
     [[ "$NEW_ORIGIN" == "$expected_alias" ]] || fail "new origin is not the canonical bootstrap alias origin"
     assert_prerequisites
     [[ "$(key_pair_state "$KEY_PATH")" == "present" ]] || fail "existing repository key is not valid"
-    validate_existing_checkout; actual_origin="$(safe_git -C "$DESTINATION" remote get-url origin)"; expected_command="ssh -F $SSH_CONFIG"
+    validate_existing_checkout
+    actual_origin="$(safe_git -C "$DESTINATION" config --local --no-includes --get remote.origin.url)"
+    expected_command="ssh -F $SSH_CONFIG"
+    probe_ssh_command="$expected_command -o BatchMode=yes -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o GlobalKnownHostsFile=/dev/null -o HostKeyAlgorithms=ssh-ed25519 -o CheckHostIP=no -o ConnectTimeout=10"
     [[ -f "$SSH_CONFIG" && ! -L "$SSH_CONFIG" ]] || fail "SSH config is missing or unsafe"
     alias="$(repository_alias "$REPOSITORY")"
     effective="$(ssh -G -F "$SSH_CONFIG" "$alias" 2>/dev/null)" || fail "cannot evaluate exact SSH config"
@@ -393,14 +415,14 @@ adopt_origin() {
     identity="$(awk '$1 == "identityfile" {print $2; exit}' <<< "$effective")"
     known_hosts="$(awk '$1 == "userknownhostsfile" {print $2; exit}' <<< "$effective")"
     [[ "$hostname" == "$GITHUB_HOST" && "$user" == "git" && "$identities" == "yes" &&
-        "$strict" == "true" && "$identity" == "$KEY_PATH" ]] ||
+        ( "$strict" == "true" || "$strict" == "yes" ) && "$identity" == "$KEY_PATH" ]] ||
         fail "SSH alias does not enforce the exact GitHub host, user, key, and strict verification"
     [[ "$known_hosts" == /* && -f "$known_hosts" && ! -L "$known_hosts" ]] ||
         fail "SSH alias known_hosts path is missing or unsafe"
     grep -Fxq "$GITHUB_HOST ssh-ed25519 $GITHUB_ED25519_KEY" "$known_hosts" ||
         fail "SSH alias does not pin GitHub's exact ED25519 host key"
     if [[ "$actual_origin" == "$NEW_ORIGIN" ]]; then
-        [[ "$(safe_git -C "$DESTINATION" config --get core.sshCommand 2>/dev/null || true)" == "$expected_command" ]] || fail "adopted checkout has an unexpected core.sshCommand"
+        [[ "$(safe_git -C "$DESTINATION" config --local --no-includes --get core.sshCommand 2>/dev/null || true)" == "$expected_command" ]] || fail "adopted checkout has an unexpected core.sshCommand"
         already_adopted=1
     else
         [[ "$actual_origin" == "$EXPECTED_OLD_ORIGIN" ]] || fail "checkout origin does not match expected old origin"
@@ -409,25 +431,25 @@ adopt_origin() {
     start_repository_operation "$destination_parent" adopt
     operation="$TEMP_PATH"; checkout="$operation/checkout"
     safe_git init --quiet "$checkout"; safe_git -C "$checkout" remote add origin "$NEW_ORIGIN"
-    GIT_SSH_VARIANT=ssh GIT_SSH_COMMAND="$expected_command" safe_git -C "$checkout" fetch --quiet --depth=1 origin "$REVISION"
+    GIT_SSH_VARIANT=ssh GIT_SSH_COMMAND="$probe_ssh_command" safe_git -C "$checkout" fetch --quiet --depth=1 origin "$REVISION"
     fetched="$(safe_git -C "$checkout" rev-parse FETCH_HEAD)"
     [[ "$fetched" == "$REVISION" ]] || fail "alias fetched revision does not match the requested commit"
     safe_git -c advice.detachedHead=false -C "$checkout" checkout --quiet --detach "$REVISION"
-    verify_read_only_capability "$checkout" "$expected_command" "$operation"
+    verify_read_only_capability "$checkout" "$probe_ssh_command" "$operation"
     cleanup_temp
     if [[ "$already_adopted" -eq 1 ]]; then
         validate_existing_checkout
         printf 'acquire.sh %s: origin adoption and read-only capability already match\n' "$VERSION"
         return
     fi
-    old_command="$(safe_git -C "$DESTINATION" config --get core.sshCommand 2>/dev/null || true)"; [[ -z "$old_command" ]] || had_command=1
+    old_command="$(safe_git -C "$DESTINATION" config --local --no-includes --get core.sshCommand 2>/dev/null || true)"; [[ -z "$old_command" ]] || had_command=1
     safe_git -C "$DESTINATION" config core.sshCommand "$expected_command"
     if ! safe_git -C "$DESTINATION" remote set-url origin "$NEW_ORIGIN"; then
         if [[ "$had_command" -eq 1 ]]; then safe_git -C "$DESTINATION" config core.sshCommand "$old_command" || true; else safe_git -C "$DESTINATION" config --unset core.sshCommand || true; fi
         fail "origin adoption failed; core.sshCommand was restored"
     fi
     if [[ "$(safe_git -C "$DESTINATION" remote get-url origin 2>/dev/null || true)" != "$NEW_ORIGIN" ||
-        "$(safe_git -C "$DESTINATION" config --get core.sshCommand 2>/dev/null || true)" != "$expected_command" ]] ||
+        "$(safe_git -C "$DESTINATION" config --local --no-includes --get core.sshCommand 2>/dev/null || true)" != "$expected_command" ]] ||
         ! (validate_existing_checkout); then
         safe_git -C "$DESTINATION" remote set-url origin "$EXPECTED_OLD_ORIGIN" || true
         if [[ "$had_command" -eq 1 ]]; then
@@ -471,6 +493,9 @@ require_basic_commands() {
 
 main() {
     trap cleanup_temp EXIT
+    unset GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_CONFIG GIT_CONFIG_PARAMETERS \
+        GIT_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_PROXY_COMMAND GIT_REPLACE_REF_BASE \
+        GIT_SSH GIT_SSH_COMMAND GIT_WORK_TREE
     parse_args "$@"; require_basic_commands
     case "$MODE" in
         prerequisites-detect)

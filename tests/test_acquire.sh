@@ -110,6 +110,36 @@ expect_failure env PATH="$mock_bin:$PATH" FAKE_REMOTE="$bare_repo" FAKE_PUSH_MOD
     "$SCRIPT" verify --authorize-acquire --repository example/project --key-path "$key_path" \
     --destination "$TEST_ROOT/checkouts/missing" --revision "$revision"
 
+fsmonitor_marker="$TEST_ROOT/fsmonitor-ran"
+fsmonitor_hook="$TEST_ROOT/fsmonitor-hook"
+printf '#!/usr/bin/env bash\nprintf triggered > %s\n' "$fsmonitor_marker" > "$fsmonitor_hook"
+chmod 0755 "$fsmonitor_hook"
+git -C "$destination" config core.fsmonitor "$fsmonitor_hook"
+PATH="$mock_bin:$PATH" FAKE_REMOTE="$bare_repo" FAKE_PUSH_MODE=read_only \
+    GIT_DIR="$TEST_ROOT/nonexistent-git-dir" GIT_WORK_TREE="$TEST_ROOT/nonexistent-work-tree" \
+    "$SCRIPT" verify --authorize-acquire --repository example/project --key-path "$key_path" \
+    --destination "$destination" --revision "$revision" >/dev/null
+[[ ! -e "$fsmonitor_marker" ]] || fail "local fsmonitor command executed"
+git -C "$destination" config --unset core.fsmonitor
+
+printf '%s\n' "$bare_repo/objects" > "$destination/.git/objects/info/alternates"
+expect_failure env PATH="$mock_bin:$PATH" FAKE_REMOTE="$bare_repo" FAKE_PUSH_MODE=read_only \
+    "$SCRIPT" verify --authorize-acquire --repository example/project --key-path "$key_path" \
+    --destination "$destination" --revision "$revision"
+rm -f -- "$destination/.git/objects/info/alternates"
+
+git --git-dir="$destination/.git" config core.worktree "$source_repo"
+expect_failure env PATH="$mock_bin:$PATH" FAKE_REMOTE="$bare_repo" FAKE_PUSH_MODE=read_only \
+    "$SCRIPT" verify --authorize-acquire --repository example/project --key-path "$key_path" \
+    --destination "$destination" --revision "$revision"
+git --git-dir="$destination/.git" config --unset core.worktree
+
+printf '%s %s\n' "$revision" "$revision" > "$destination/.git/info/grafts"
+expect_failure env PATH="$mock_bin:$PATH" FAKE_REMOTE="$bare_repo" FAKE_PUSH_MODE=read_only \
+    "$SCRIPT" verify --authorize-acquire --repository example/project --key-path "$key_path" \
+    --destination "$destination" --revision "$revision"
+rm -f -- "$destination/.git/info/grafts"
+
 for failure_mode in write_success network auth changed; do
     failed_destination="$TEST_ROOT/checkouts/fail-$failure_mode"
     expect_failure env PATH="$mock_bin:$PATH" FAKE_REMOTE="$bare_repo" FAKE_PUSH_MODE="$failure_mode" \
