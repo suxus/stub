@@ -12,6 +12,7 @@ permissions:
 
 env:
   ALMALINUX_IMAGE: docker.io/library/almalinux@sha256:9f355ae942d6a6c0561f0771dc053a2cfae9580fc45fa4252756db7c7e80c09f
+  CENTOS7_IMAGE: quay.io/centos/centos@sha256:e4ca2ed0202e76be184e75fb26d14bf974193579039d5573fb2348664deef76e
 
 concurrency:
   group: validation-${{ github.workflow }}-${{ github.ref }}
@@ -35,9 +36,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          bash -n acquire.sh inventory.sh tests/test_acquire.sh tests/test_acquire_almalinux.sh tests/test_inventory.sh
-          shellcheck acquire.sh inventory.sh tests/test_acquire.sh tests/test_acquire_almalinux.sh tests/test_inventory.sh
+          bash -n acquire.sh bootstrap-source-toolchain.sh inventory.sh tests/test_acquire.sh tests/test_acquire_almalinux.sh tests/test_bootstrap_source_toolchain.sh tests/test_inventory.sh
+          shellcheck acquire.sh bootstrap-source-toolchain.sh inventory.sh tests/test_acquire.sh tests/test_acquire_almalinux.sh tests/test_bootstrap_source_toolchain.sh tests/test_inventory.sh
           tests/test_acquire.sh
+          tests/test_bootstrap_source_toolchain.sh
           tests/test_inventory.sh
           git diff --check HEAD^
       - name: Scan committed tree for prohibited material
@@ -109,3 +111,33 @@ jobs:
             --volume "$GITHUB_WORKSPACE:/workspace:ro" \
             "$ALMALINUX_IMAGE" \
             bash /workspace/tests/test_acquire_almalinux.sh "$SCENARIO"
+
+  centos-7-bash-4-2:
+    name: CentOS 7 / Bash 4.2 offline contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact workflow revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          git -c protocol.version=2 fetch --no-tags --depth=2 origin "$GITHUB_SHA"
+          git checkout --detach "$GITHUB_SHA"
+      - name: Pull and identify CentOS 7 image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull "$CENTOS7_IMAGE"
+          docker image inspect --format 'Image ID: {{.Id}}' "$CENTOS7_IMAGE"
+          docker image inspect --format 'Repository digests: {{join .RepoDigests ", "}}' "$CENTOS7_IMAGE"
+      - name: Run Bash 4.2-compatible offline contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --network none \
+            --volume "$GITHUB_WORKSPACE:/workspace:ro" \
+            "$CENTOS7_IMAGE" \
+            bash /workspace/tests/test_bootstrap_source_toolchain.sh

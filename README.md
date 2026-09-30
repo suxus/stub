@@ -29,6 +29,74 @@ sudo ./inventory.sh
 Keep the output local unless it has been reviewed and an approved channel has
 been selected deliberately.
 
+## CentOS 7 source toolchain bootstrap
+
+`bootstrap-source-toolchain.sh` is a deliberately narrow bridge for a legacy
+CentOS 7 systemd host whose configured yum repositories do not offer the
+reviewed Git baseline. It never checks or reports a host name, address, port,
+account, key, fingerprint, or environment identity.
+
+The minimum acceptable distribution Git is 2.43.7. This is the pinned and
+reviewed acquisition baseline, including the environment-based Git config and
+`protocol.*.allow` controls used by `acquire.sh`. If the configured yum
+repositories offer Git 2.43.7 or newer, the source-build route is refused and
+the distribution package route must be used instead.
+
+Run the non-installing plan first from an exact reviewed Stub commit:
+
+```sh
+sudo ./bootstrap-source-toolchain.sh plan
+```
+
+The plan validates the exact `inventory.sh` classification
+`os_id=centos`, `os_version=7`, and `init_style=systemd`; queries all Git
+versions offered by the configured yum repositories; and classifies the local
+parallel-install state. It performs no package transaction and does not build
+or publish software. Yum may read or refresh its normal repository metadata
+cache while answering the query. Repository errors, missing candidates, and
+ambiguous version output fail closed.
+
+Only after reviewing that plan, authorize the source route explicitly:
+
+```sh
+sudo ./bootstrap-source-toolchain.sh install --authorize-source-build
+```
+
+The source route installs only missing build prerequisites from the configured
+distribution repositories. The fixed CentOS 7 build-package set is `gcc`,
+`make`, `libcurl-devel`, `expat-devel`, `openssl-devel`, `perl-ExtUtils-MakeMaker`,
+`zlib-devel`, and `ncurses-devel`. The `curl`, `tar`, and `sha256sum`
+commands are checked independently and map to the CentOS 7 `curl`, `tar`, and
+`coreutils` packages only when missing. No external RPM repository is added.
+
+The only source inputs are:
+
+- Git 2.43.7 from
+  `https://www.kernel.org/pub/software/scm/git/git-2.43.7.tar.gz`, SHA-256
+  `b30055b0dac1aebcb6f332f1fddbc81e3ce43819920a23709d71b4f76763f1f4`;
+- Bash 5.2.37 from `https://ftp.gnu.org/gnu/bash/bash-5.2.37.tar.gz`, SHA-256
+  `9599b22ecd1d5787ad7d3b7bf0c59f312b3396d1e281175dd1f8a4014da621ff`.
+
+Both archives must pass checksum and archive-path validation. Installation is
+staged before publication. Git is installed at `/opt/suxus/git/2.43.7` and the
+exact `/usr/local/bin/git` symlink activates it. Bash is installed alongside the
+system shell at `/opt/suxus/bash/5.2.37`; `/bin/bash` is never replaced or
+linked. Existing Git and Bash RPM identities and the `/bin/bash` file are
+captured before mutation and verified unchanged afterward.
+
+An exact existing parallel installation is verified and accepted idempotently.
+Partial prefixes, a wrong link, checksum drift, package or repository errors,
+build failures, and failed final verification stop safely. Success is reported
+only as `SOURCE_TOOLCHAIN_READY` after Git version and exec-path checks, Bash
+version and empty-array checks, Git security-control checks, RPM/system-shell
+preservation checks, and successful `acquire.sh prerequisites-detect` and
+`prerequisites-plan` runs under the parallel Bash.
+
+Inspect the complete script and independently compare its SHA-256 before any
+privileged execution. Do not use `curl | bash`. Package-manager transactions do
+not have a general rollback guarantee; the script can clean up only the source
+outputs and staging paths that it can prove it created itself.
+
 ## Acquire
 
 `acquire.sh` prepares one repository-scoped ED25519 keypair and uses it to fetch
