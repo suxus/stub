@@ -97,6 +97,11 @@ privileged execution. Do not use `curl | bash`. Package-manager transactions do
 not have a general rollback guarantee; the script can clean up only the source
 outputs and staging paths that it can prove it created itself.
 
+The [legacy source-toolchain runbook](docs/legacy-source-toolchain-runbook.md)
+provides the complete generic operator sequence for obtaining an exact reviewed
+Stub revision, independently verifying this script, reviewing a plan, and
+keeping installation behind a separate explicit authorization.
+
 ## Acquire
 
 `acquire.sh` prepares one repository-scoped ED25519 keypair and uses it to fetch
