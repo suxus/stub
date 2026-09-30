@@ -36,11 +36,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          bash -n acquire.sh bootstrap-source-toolchain.sh inventory.sh tests/test_acquire.sh tests/test_acquire_almalinux.sh tests/test_bootstrap_source_toolchain.sh tests/test_inventory.sh
-          shellcheck acquire.sh bootstrap-source-toolchain.sh inventory.sh tests/test_acquire.sh tests/test_acquire_almalinux.sh tests/test_bootstrap_source_toolchain.sh tests/test_inventory.sh
+          bash -n acquire.sh bootstrap-source-toolchain.sh inventory.sh tests/test_acquire.sh tests/test_acquire_almalinux.sh tests/test_bootstrap_source_toolchain.sh tests/test_inventory.sh tests/test_legacy_source_toolchain_runbook.sh
+          shellcheck acquire.sh bootstrap-source-toolchain.sh inventory.sh tests/test_acquire.sh tests/test_acquire_almalinux.sh tests/test_bootstrap_source_toolchain.sh tests/test_inventory.sh tests/test_legacy_source_toolchain_runbook.sh
           tests/test_acquire.sh
           tests/test_bootstrap_source_toolchain.sh
           tests/test_inventory.sh
+          tests/test_legacy_source_toolchain_runbook.sh
           git diff --check HEAD^
       - name: Scan committed tree for prohibited material
         shell: bash
